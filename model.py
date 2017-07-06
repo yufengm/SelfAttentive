@@ -30,7 +30,8 @@ class SelfAttentive( nn.Module ):
         self.nhid = nhid
         self.nlayers = nlayers
 
-        self.cuda = cuda
+        if cuda:
+            self.cuda()
 
     def init_weights( self ):
         initrange = 0.1
