@@ -39,7 +39,7 @@ parser.add_argument('--batch-size', type=int, default=32, metavar='N', help='bat
 parser.add_argument('--eval_size', type=int, default=32, metavar='N', help='evaluation batch size')
 parser.add_argument('--seed', type=int, default=1111, help='random seed')
 parser.add_argument('--pretrained', type=str, default='', help='whether start from pretrained model')
-parser.add_argument('--cuda', default=True, action='store_true', help='use CUDA')
+parser.add_argument('--cuda', default=False, action='store_true', help='use CUDA')
 parser.add_argument('--log-interval', type=int, default=10, metavar='N', help='report interval')
 parser.add_argument('--save', type=str,  default='Attentive-best.pt', help='path to save the final model')
 
@@ -47,7 +47,7 @@ args = parser.parse_args()
 
 # # Define the corpus and load data
 corpus = Corpus( args.data )
-print 'Training data loaded.....'
+print('Training data loaded.....')
 
 # Make Dataset batchifiable
 train_data = select_data( corpus.train, args.batch_size )
@@ -64,22 +64,25 @@ test_label = select_data( corpus.test_label, args.eval_size )
 
 
 # Pretrained Glove word vectors and Word Indices in Embedding matrix that are not included in Glove
-emb_matrix = torch.load( args.data + 'emb_matrix.pt' )
-word_idx_list = torch.load( args.data + 'word_idx_list.pt' )
 if args.cuda:
+    emb_matrix = torch.load( args.data + 'emb_matrix.pt' )
+    word_idx_list = torch.load( args.data + 'word_idx_list.pt' )
     emb_matrix.cuda()
     word_idx_list.cuda()
+else:
+    emb_matrix = torch.load( args.data + 'emb_matrix.pt', map_location=lambda storage, loc: storage )
+    word_idx_list = torch.load( args.data + 'word_idx_list.pt', map_location=lambda storage, loc: storage )
 
-    
+
 # Define Model
 ntokens = len( corpus.dictionary )
 nclass = 2
 
 if not args.pretrained:
-    model = SelfAttentive( ntokens, args.emsize, args.nhid, args.nlayers, args.da, args.r, args.mlp_nhid, nclass, emb_matrix )
+    model = SelfAttentive( ntokens, args.emsize, args.nhid, args.nlayers, args.da, args.r, args.mlp_nhid, nclass, emb_matrix, args.cuda )
 else:
     model = torch.load( args.pretrained )
-    print 'Pretrained model loaded.'
+    print('Pretrained model loaded.')
 
 entropy_loss = nn.CrossEntropyLoss()
 if args.cuda:
@@ -96,31 +99,31 @@ def train( lr, epoch ):
     all_losses = []
 
     hidden = model.init_hidden( args.batch_size )
-    
+
     # Per-parameter training
     params = list( model.parameters() )
-    
+
     optimizer = torch.optim.SGD( params, lr, momentum = args.momentum, weight_decay = args.weight_decay )
-    
+
     for batch_idx, start_idx in enumerate( range( 0, train_data.size(0) - 1, args.batch_size ) ):
-        
+
         # Retrieve one batch for training
         data, targets, len_li = get_batch( train_data, train_label, train_len, start_idx, args.batch_size, args.cuda )
         hidden = repackage_hidden( hidden )
-        
+
         output, hidden, penal, weights = model( data, hidden, len_li )
-        
+
         # Loss = cross_entropy + lambda * penalization
         loss = entropy_loss( output.view( -1, nclass ), targets ) + args.lamb * penal
-        
+
         optimizer.zero_grad()
         loss.backward()
-        
+
         # Gradient clipping in case of gradient explosion
         torch.nn.utils.clip_grad_norm( model.parameters(), args.clip )
-        
+
         optimizer.step()
-        
+
         total_loss += loss.data
         all_losses.append( loss.data )
 
@@ -132,7 +135,7 @@ def train( lr, epoch ):
                     'loss {:5.2f} |'.format(
                 epoch, batch_idx, len( train_data ) // args.batch_size, lr,
                 elapsed * 1000 / args.log_interval, cur_loss ) )
-                  
+
             total_loss = 0
             start_time = time.time()
 
@@ -142,50 +145,50 @@ def train( lr, epoch ):
 # Define evaluation function
 def evaluate( data_source, labels, data_len ):
     total_loss = 0
-    
+
     acc = []
     pre = []
     rec = []
     f1 = []
-    
+
     ntokens = len( corpus.dictionary )
     hidden = model.init_hidden( args.eval_size )
-    
+
     for i in range( 0, data_source.size(0) - 1, args.eval_size ):
-        
+
         data, targets, len_li = get_batch( data_source, labels, data_len, i, args.eval_size, args.cuda, evaluation=True )
         output, hidden, penal, weights = model( data, hidden, len_li )
         output_flat = output.view( -1, nclass )
-        
+
         total_loss += data.size( 0 ) * ( entropy_loss( output_flat, targets ).data + penal.data )
         hidden = repackage_hidden( hidden )
-        
+
         _, pred = output_flat.topk( 1 , 1, True, True )
         pred = pred.t()
         target = targets.view( 1, -1 )
-        
+
         p, r, f, a = compute_measure( pred, target )
         acc.append( a )
         pre.append( p )
         rec.append( r )
         f1.append( f )
-    
+
     # Compute Precision, Recall, F1, and Accuracy
-    print 'Measure on this dataset'
-    print 'Precision:', np.mean( pre )
-    print 'Recall:', np.mean( rec )
-    print 'F1:', np.mean( f1 )
-    print 'Acc:', np.mean( acc )
+    print('Measure on this dataset')
+    print('Precision:', np.mean( pre ))
+    print('Recall:', np.mean( rec ))
+    print('F1:', np.mean( f1 ))
+    print('Acc:', np.mean( acc ))
 
     return total_loss[0] / len( data_source )
 
 
 # Training Process
-print 'Start training...'
+print('Start training...')
 lr = args.lr
 best_val_loss = None
 all_losses = []
-print '# of Epochs:', args.epochs
+print('# of Epochs:', args.epochs)
 
 for epoch in range( 1, args.epochs + 1 ):
     epoch_start_time = time.time()
@@ -203,7 +206,7 @@ for epoch in range( 1, args.epochs + 1 ):
             torch.save( model , f )
     else:
         lr /= 4.0
-        
+
 
 # Plot the Learning Curve
 plt.figure()
